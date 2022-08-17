@@ -2,14 +2,11 @@
 # Imports
 #----------------------------------------------------------------------------#
 
-from email.policy import default
-import json
 import datetime
-from typing import final
-from unicodedata import name
+
 import dateutil.parser
 import babel
-from flask import Flask, render_template, request, Response, flash, redirect, url_for
+from flask import Flask, render_template, request, flash, redirect, url_for,jsonify
 from flask_moment import Moment
 from flask_sqlalchemy import SQLAlchemy
 import logging
@@ -17,102 +14,25 @@ from logging import Formatter, FileHandler
 from flask_wtf import Form
 from forms import *
 from flask_migrate import Migrate
-from sqlalchemy import DateTime,and_
+from sqlalchemy import and_
+from sqlalchemy.event import listen
+from models import Venue,Artist,Area,Genre,Show,db,app
 #----------------------------------------------------------------------------#
 # App Config.
 #----------------------------------------------------------------------------#
 
-app = Flask(__name__)
-moment = Moment(app)
-app.config.from_object('config')
-db = SQLAlchemy(app)
-
 migrate = Migrate(app,db)
 
-# TODO: connect to a local postgresql database # done
 
-#----------------------------------------------------------------------------#
-# Models.
-#----------------------------------------------------------------------------#
+def insert_initial_values(*args, **kw):
+  genre_names = ['Alternative','Blues','Classical','Country','Electronic','Folk','Funk','Hip-Hop','Heavy Metal','Instrumental','Jazz','Musical Theatre','Pop','Punk','R&B','Reggae','Rock n Roll','Soul','Other']
+  genres = [Genre(name=gn) for gn in genre_names]
+  db.session.add_all(genres)
+  db.session.commit()
+  db.session.close()
+listen(Genre.__table__,'after_create',insert_initial_values)
 
-genre_artists = db.Table('genre_artists',
-  db.Column('artist_id',db.Integer,db.ForeignKey('Artist.id'),primary_key=True),
-  db.Column('genre_id',db.Integer,db.ForeignKey('genres.id'),primary_key=True)
-  )
-
-genre_venues = db.Table('genre_venues',
-  db.Column('venue_id',db.Integer,db.ForeignKey('Venue.id'),primary_key=True),
-  db.Column('genre_id',db.Integer,db.ForeignKey('genres.id',ondelete='CASCADE'),primary_key=True)
-  )
-
-
-class Venue(db.Model):
-    __tablename__ = 'Venue'
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String,nullable = False,unique=True)
-    area_id = db.Column(db.Integer,db.ForeignKey('areas.id',ondelete = 'CASCADE'),nullable = False)
-    address = db.Column(db.String(120),nullable = False)
-    phone = db.Column(db.String(120),nullable = False)
-    image_link = db.Column(db.String(500),nullable = False)
-    facebook_link = db.Column(db.String(120),nullable = False,default='')
-    website_link = db.Column(db.String(120),nullable = False,default='')
-    looking_for_talents = db.Column(db.Boolean,nullable = False,default=False)
-    seeking_description = db.Column(db.String(),nullable=False,default='')
-    genres = db.relationship('Genre',secondary=genre_venues,
-    back_populates='venues')
-    shows = db.relationship('Show',backref='venue',lazy=True,cascade = 'all,delete-orphan')
-    #TODO: many-to-many relationship with genres #done
-    # TODO: implement any missing fields, as a database migration using Flask-Migrate  # done
-
-class Artist(db.Model):
-    __tablename__ = 'Artist'
-
-    id = db.Column(db.Integer, primary_key=True)
-    name = db.Column(db.String(),nullable =False,unique=True)
-    area_id = db.Column(db.Integer,db.ForeignKey('areas.id',ondelete='CASCADE'),nullable = False)
-    phone = db.Column(db.String(120),nullable=False)
-    # genres = db.Column(db.String(120))
-    image_link = db.Column(db.String(500),nullable=False)
-    facebook_link = db.Column(db.String(120),nullable=False,default='')
-    website_link = db.Column(db.String(120),nullable=False,default='')
-    looking_for_venues = db.Column(db.Boolean,nullable=False,default=False)
-    seeking_description = db.Column(db.String(),nullable=False,default='')
-    genres = db.relationship('Genre',secondary=genre_artists,
-    backref=db.backref('artists',lazy=True))
-    shows = db.relationship('Show',backref='artist',lazy=True,cascade = 'all,delete-orphan')
-
-    # TODO: implement any missing fields, as a database migration using Flask-Migrate #done
-    #TODO: many-to-many relationship between Artist and genres #done
-
-# TODO Implement Show and Artist models, and complete all model relationships and properties, as a database migration. #done
-
-class Show(db.Model):
-  __tablename__ = 'shows'
-
-  id = db.Column(db.Integer,primary_key = True)
-  artist_id = db.Column(db.Integer,db.ForeignKey('Artist.id',ondelete='CASCADE'),nullable=False)
-  venue_id = db.Column(db.Integer,db.ForeignKey('Venue.id',ondelete='CASCADE'),nullable=False)
-  start_time = db.Column(db.String(),nullable=False)
-
-class Genre(db.Model):
-  __tablename__ = 'genres'
-  id = db.Column(db.Integer,primary_key=True)
-  name = db.Column(db.String(),nullable=False,unique=True)
-  venues = db.relationship('Venue',secondary=genre_venues,
-    back_populates='genres')
-
-class Area(db.Model):
-  __tablename__ = 'areas'
-  id = db.Column(db.Integer,primary_key=True)
-  city = db.Column(db.String(),nullable=False,unique=True)
-  state = db.Column(db.String(2),nullable=False)
-  artists = db.relationship('Artist',backref='area',lazy=True,cascade='all,delete-orphan')
-  venues = db.relationship('Venue',backref='area',lazy=True,cascade='all,delete-orphan')
-
-
-
-
+db.create_all()
 #----------------------------------------------------------------------------#
 # Filters.
 #----------------------------------------------------------------------------#
@@ -142,17 +62,6 @@ def index():
 #  Venues
 #  ----------------------------------------------------------------
 
-def get_venue_upcoming_show(venue_id):
-  return Show.query.filter(and_(Show.venue_id == venue_id, Show.start_time >= datetime.now()))
-
-def get_venue_past_show(venue_id):
-  return Show.query.filter(and_(Show.venue_id == venue_id, Show.start_time < datetime.now()))
-
-def get_artist_upcoming_show(artist_id):
-  return Show.query.filter(and_(Show.artist_id == artist_id, Show.start_time >= datetime.now()))
-
-def get_artist_past_show(artist_id):
-  return Show.query.filter(and_(Show.artist_id == artist_id, Show.start_time < datetime.now()))
 
 @app.route('/venues')
 def venues():
@@ -164,7 +73,7 @@ def venues():
     "venues": [{
       "id": v.id,
       "name": v.name,
-      "num_upcoming_shows": get_venue_upcoming_show(v.id).count(),
+      "num_upcoming_shows": v.num_past_shows(),
     } for v in area.venues]
   } for area in Area.query.all() if len(area.venues)!=0 ]
   
@@ -182,7 +91,7 @@ def search_venues():
     "data": [{
       "id": venue.id,
       "name": venue.name,
-      "num_upcoming_shows": get_venue_upcoming_show(venue.id).count(),
+      "num_upcoming_shows": venue.num_past_shows(),
     } for venue in q.all()]
   }
   return render_template('pages/search_venues.html', results=response, search_term=request.form.get('search_term', ''))
@@ -212,15 +121,15 @@ def show_venue(venue_id):
       "artist_name": show.artist.name,
       "artist_image_link": show.artist.image_link,
       "start_time": show.start_time
-    }for show in get_venue_past_show(venue_id)],
+    }for show in venue.past_shows()],
     "upcoming_shows": [{
       "artist_id": show.artist_id,
       "artist_name": show.artist.name,
       "artist_image_link": show.artist.image_link,
       "start_time": show.start_time
-    }for show in get_venue_upcoming_show(venue_id)],
-    "past_shows_count": get_venue_past_show(venue_id).count(),
-    "upcoming_shows_count": get_venue_upcoming_show(venue_id).count(),
+    }for show in venue.upcoming_shows()],
+    "past_shows_count": venue.num_past_shows(),
+    "upcoming_shows_count": venue.num_upcoming_shows(),
   }
  
   
@@ -322,7 +231,7 @@ def search_artists():
     "data": [{
       "id": artist.id,
       "name": artist.name,
-      "num_upcoming_shows": get_artist_upcoming_show(artist.id).count(),
+      "num_upcoming_shows": artist.upcoming_shows(),
     } for artist in q.all()]
   }
   return render_template('pages/search_artists.html', results=response, search_term=request.form.get('search_term', ''))
@@ -349,15 +258,15 @@ def show_artist(artist_id):
       "venue_name": show.venue.name,
       "venue_image_link": show.venue.image_link,
       "start_time": show.start_time
-    } for show in get_artist_past_show(artist_id).all()],
+    } for show in artist.past_shows()],
     "upcoming_shows": [{
       "venue_id": show.venue_id,
       "venue_name": show.venue.name,
       "venue_image_link": show.venue.image_link,
       "start_time": show.start_time
-    } for show in get_artist_upcoming_show(artist_id).all()],
-    "past_shows_count": get_artist_past_show(artist_id).count(),
-    "upcoming_shows_count": get_artist_upcoming_show(artist_id).count(),
+    } for show in artist.upcoming_shows()],
+    "past_shows_count": artist.num_past_shows(),
+    "upcoming_shows_count": artist.num_upcoming_shows(),
   }
 
   return render_template('pages/show_artist.html', artist=data)
